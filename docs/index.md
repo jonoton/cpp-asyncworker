@@ -17,6 +17,6 @@ Welcome to the **cpp-asyncworker** documentation! This is a lightweight, thread-
 
 ## Table of Contents
 
-- [Getting Started]({{ '/getting-started/' | relative_url }}) - Installation and requirements.
-- [Basic Usage]({{ '/basic-usage/' | relative_url }}) - Basic usage of the `WorkerPool`.
-- [Advanced Usage]({{ '/advanced-usage/' | relative_url }}) - Handling return values, futures, and synchronization.
+- [Getting Started]({{ '/getting-started.html' | relative_url }}) - Installation and requirements.
+- [Basic Usage]({{ '/basic-usage.html' | relative_url }}) - Basic usage of the `WorkerPool`.
+- [Advanced Usage]({{ '/advanced-usage.html' | relative_url }}) - Handling return values, futures, and synchronization.
