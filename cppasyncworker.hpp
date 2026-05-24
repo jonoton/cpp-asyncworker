@@ -11,13 +11,14 @@
 #include <functional>
 #include <stdexcept>
 #include <type_traits>
+#include <tuple>
 
 namespace cppasyncworker
 {
 
     constexpr int VERSION_MAJOR = 1;
-    constexpr int VERSION_MINOR = 0;
-    constexpr int VERSION_PATCH = 1;
+    constexpr int VERSION_MINOR = 1;
+    constexpr int VERSION_PATCH = 0;
 
     /**
      * @brief Returns the library version as a string.
@@ -50,6 +51,11 @@ namespace cppasyncworker
          */
         explicit WorkerPool(size_t threads = std::thread::hardware_concurrency())
         {
+            if (threads == 0)
+            {
+                threads = 1;
+            }
+
             for (size_t i = 0; i < threads; ++i)
             {
                 workers_.emplace_back([this]
