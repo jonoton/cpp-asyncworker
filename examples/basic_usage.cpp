@@ -18,7 +18,9 @@ int main() {
         });
     }
 
-    std::cout << "Tasks enqueued, waiting for pool destruction to join threads..." << std::endl;
+    std::cout << "Tasks enqueued, waiting for all tasks to complete via pool.Wait()..." << std::endl;
+    pool.Wait();
+    std::cout << "All tasks finished! Exiting." << std::endl;
 
     return 0;
 }
