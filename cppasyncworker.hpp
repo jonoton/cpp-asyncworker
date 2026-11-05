@@ -1,3 +1,8 @@
+// cpp-asyncworker - A lightweight, thread-safe, and header-only C++ library for managing asynchronous tasks using a worker pool
+// https://github.com/jonoton/cpp-asyncworker
+// Copyright (c) 2025 cpp-asyncworker
+// Licensed under the MIT License. SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <condition_variable>
@@ -16,8 +21,8 @@
 namespace cppasyncworker {
 
 constexpr int VERSION_MAJOR = 1;
-constexpr int VERSION_MINOR = 2;
-constexpr int VERSION_PATCH = 1;
+constexpr int VERSION_MINOR = 3;
+constexpr int VERSION_PATCH = 0;
 
 /**
  * @brief Returns the library version as a string.
