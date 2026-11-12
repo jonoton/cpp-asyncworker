@@ -90,17 +90,80 @@ class UniqueTask {
  */
 class WorkerPool {
  private:
-  std::vector<std::thread> workers_;
-  std::queue<UniqueTask> tasks_;
+  // State shared with the worker threads. A worker that has to be detached
+  // (Stop() called from inside one of its own tasks) keeps this alive, so it
+  // never touches the WorkerPool object after the pool is destroyed.
+  struct State {
+    std::queue<UniqueTask> tasks;
+    std::mutex queue_mutex;
+    std::condition_variable cv_task;
+    std::condition_variable cv_producer;
+    std::condition_variable cv_wait;
+    bool stop{false};
+    size_t max_queue_size{0};
+    size_t active_tasks{0};
+    ErrorHandler error_handler;
+  };
 
-  mutable std::mutex queue_mutex_;
-  std::condition_variable cv_task_;
-  std::condition_variable cv_producer_;
-  std::condition_variable cv_wait_;
-  bool stop_{false};
-  const size_t max_queue_size_ = 0;
-  size_t active_tasks_{0};
-  ErrorHandler error_handler_;
+  std::shared_ptr<State> state_ = std::make_shared<State>();
+  std::vector<std::thread> workers_;
+  std::queue<UniqueTask> &tasks_ = state_->tasks;
+  std::mutex &queue_mutex_ = state_->queue_mutex;
+  std::condition_variable &cv_task_ = state_->cv_task;
+  std::condition_variable &cv_producer_ = state_->cv_producer;
+  std::condition_variable &cv_wait_ = state_->cv_wait;
+  bool &stop_ = state_->stop;
+  size_t &max_queue_size_ = state_->max_queue_size;
+  size_t &active_tasks_ = state_->active_tasks;
+  ErrorHandler &error_handler_ = state_->error_handler;
+
+  static void WorkerLoop(std::shared_ptr<State> state) {
+    for (;;) {
+      UniqueTask task;
+
+      {
+        std::unique_lock<std::mutex> lock(state->queue_mutex);
+
+        state->cv_task.wait(lock, [&state] {
+          return state->stop || !state->tasks.empty();
+        });
+
+        if (state->stop && state->tasks.empty()) {
+          return;
+        }
+
+        task = std::move(state->tasks.front());
+        state->tasks.pop();
+
+        if (state->max_queue_size > 0) {
+          state->cv_producer.notify_one();
+        }
+      }
+
+      // The outer catch block serves as a fallback safety net for the
+      // worker thread. While std::packaged_task intercepts and stores
+      // task exceptions, any other unexpected exception from the task
+      // wrapper itself (e.g. std::bad_function_call) will be caught here
+      // to prevent thread termination.
+      try {
+        task();
+      } catch (...) {
+        if (state->error_handler) {
+          try {
+            state->error_handler(std::current_exception());
+          } catch (...) {
+            // Swallow exception to prevent thread termination
+          }
+        }
+      }
+      {
+        std::unique_lock<std::mutex> lock(state->queue_mutex);
+        if (--state->active_tasks == 0) {
+          state->cv_wait.notify_all();
+        }
+      }
+    }
+  }
 
  public:
   /**
@@ -114,62 +177,16 @@ class WorkerPool {
    */
   explicit WorkerPool(size_t threads = std::thread::hardware_concurrency(),
                       size_t max_queue_size = 0,
-                      ErrorHandler error_handler = nullptr)
-      : max_queue_size_(max_queue_size),
-        error_handler_(std::move(error_handler)) {
+                      ErrorHandler error_handler = nullptr) {
+    max_queue_size_ = max_queue_size;
+    error_handler_ = std::move(error_handler);
     if (threads == 0) {
       threads = 1;
     }
 
     try {
       for (size_t i = 0; i < threads; ++i) {
-        workers_.emplace_back([this] {
-          for (;;) {
-            UniqueTask task;
-
-            {
-              std::unique_lock<std::mutex> lock(this->queue_mutex_);
-
-              this->cv_task_.wait(lock, [this] {
-                return this->stop_ || !this->tasks_.empty();
-              });
-
-              if (this->stop_ && this->tasks_.empty()) {
-                return;
-              }
-
-              task = std::move(this->tasks_.front());
-              this->tasks_.pop();
-
-              if (this->max_queue_size_ > 0) {
-                this->cv_producer_.notify_one();
-              }
-            }
-
-            // The outer catch block serves as a fallback safety net for the
-            // worker thread. While std::packaged_task intercepts and stores
-            // task exceptions, any other unexpected exception from the task
-            // wrapper itself (e.g. std::bad_function_call) will be caught here
-            // to prevent thread termination.
-            try {
-              task();
-            } catch (...) {
-              if (this->error_handler_) {
-                try {
-                  this->error_handler_(std::current_exception());
-                } catch (...) {
-                  // Swallow exception to prevent thread termination
-                }
-              }
-            }
-            {
-              std::unique_lock<std::mutex> lock(this->queue_mutex_);
-              if (--this->active_tasks_ == 0) {
-                this->cv_wait_.notify_all();
-              }
-            }
-          }
-        });
+        workers_.emplace_back(&WorkerPool::WorkerLoop, state_);
       }
     } catch (...) {
       {
@@ -190,7 +207,8 @@ class WorkerPool {
   /**
    * @brief Stops the worker pool and terminates worker threads.
    * If called from within a worker thread, that worker thread is detached to
-   * avoid self-join deadlock (EDEADLK).
+   * avoid self-join deadlock (EDEADLK); it finishes its current task and any
+   * queued tasks using shared state, never the destroyed pool object.
    */
   void Stop() {
     {
@@ -247,7 +265,7 @@ class WorkerPool {
         [func = std::forward<F>(f),
          args_tuple =
              std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
-         this]() mutable {
+         state = state_]() mutable {
           try {
             return std::apply(std::move(func), std::move(args_tuple));
           } catch (...) {
@@ -256,9 +274,9 @@ class WorkerPool {
             // stores them in the future (without propagating them to the worker
             // thread's outer try-catch block), this handler invocation is
             // necessary to ensure background exception logging.
-            if (this->error_handler_) {
+            if (state->error_handler) {
               try {
-                this->error_handler_(std::current_exception());
+                state->error_handler(std::current_exception());
               } catch (...) {
                 // Swallow error handler exception
               }
