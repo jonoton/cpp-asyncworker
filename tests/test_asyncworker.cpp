@@ -370,3 +370,31 @@ TEST(WorkerPoolTest, ErrorHandlerCalledOnException) {
   EXPECT_THROW(fut.get(), std::runtime_error);
   EXPECT_EQ(exception_msg_future.get(), "Simulated Task Exception");
 }
+
+TEST(WorkerPoolTest, StopFromWorkerThreadDoesNotDeadlock) {
+  auto pool = std::make_shared<WorkerPool>(2);
+  std::promise<void> done_promise;
+  auto done_future = done_promise.get_future();
+
+  auto f1 = pool->Enqueue([pool, &done_promise]() {
+    EXPECT_NO_THROW(pool->Stop());
+    done_promise.set_value();
+  });
+
+  EXPECT_EQ(done_future.wait_for(std::chrono::seconds(2)),
+            std::future_status::ready);
+}
+
+TEST(WorkerPoolTest, DestructorFromWorkerThreadDoesNotDeadlock) {
+  std::shared_ptr<WorkerPool> pool = std::make_shared<WorkerPool>(2);
+  std::promise<void> done_promise;
+  auto done_future = done_promise.get_future();
+
+  auto f2 = pool->Enqueue([&pool, &done_promise]() {
+    EXPECT_NO_THROW(pool.reset());
+    done_promise.set_value();
+  });
+
+  EXPECT_EQ(done_future.wait_for(std::chrono::seconds(2)),
+            std::future_status::ready);
+}

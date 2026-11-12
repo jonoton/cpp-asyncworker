@@ -188,22 +188,39 @@ class WorkerPool {
   }
 
   /**
-   * @brief Destructor that joins all worker threads.
+   * @brief Stops the worker pool and terminates worker threads.
+   * If called from within a worker thread, that worker thread is detached to
+   * avoid self-join deadlock (EDEADLK).
    */
-  ~WorkerPool() {
+  void Stop() {
     {
       std::unique_lock<std::mutex> lock(queue_mutex_);
+      if (stop_) {
+        return;
+      }
       stop_ = true;
     }
 
     cv_task_.notify_all();
     cv_producer_.notify_all();
 
+    const auto current_id = std::this_thread::get_id();
     for (std::thread &worker : workers_) {
       if (worker.joinable()) {
-        worker.join();
+        if (worker.get_id() == current_id) {
+          worker.detach();
+        } else {
+          worker.join();
+        }
       }
     }
+  }
+
+  /**
+   * @brief Destructor that stops the worker pool and joins worker threads.
+   */
+  ~WorkerPool() {
+    Stop();
   }
 
   // Prevent copying and assignment semantics
