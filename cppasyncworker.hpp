@@ -234,7 +234,8 @@ class WorkerPool {
    * @tparam F The function type.
    * @tparam Args The argument types.
    * @param f The function to execute.
-   * @param args The arguments to pass to the function.
+   * @param args The arguments to pass to the function. Arguments are copied
+   * by default; wrap in std::ref or std::cref to pass arguments by reference.
    * @return A std::future containing the return value of the function.
    */
   template <class F, class... Args>
@@ -244,7 +245,8 @@ class WorkerPool {
 
     std::packaged_task<return_type()> task(
         [func = std::forward<F>(f),
-         args_tuple = std::make_tuple(std::forward<Args>(args)...),
+         args_tuple =
+             std::tuple<std::decay_t<Args>...>(std::forward<Args>(args)...),
          this]() mutable {
           try {
             return std::apply(std::move(func), std::move(args_tuple));

@@ -398,3 +398,20 @@ TEST(WorkerPoolTest, DestructorFromWorkerThreadDoesNotDeadlock) {
   EXPECT_EQ(done_future.wait_for(std::chrono::seconds(2)),
             std::future_status::ready);
 }
+
+TEST(WorkerPoolTest, SupportsStdRefArguments) {
+  WorkerPool pool(2);
+  int val = 10;
+  auto fut = pool.Enqueue([](int &x) { x = 42; }, std::ref(val));
+  fut.get();
+  EXPECT_EQ(val, 42);
+}
+
+TEST(WorkerPoolTest, CopiesArgumentsByDefault) {
+  WorkerPool pool(2);
+  int val = 10;
+  auto fut = pool.Enqueue([](int x) { x = 42; return x; }, val);
+  int result = fut.get();
+  EXPECT_EQ(result, 42);
+  EXPECT_EQ(val, 10);
+}
